@@ -62,7 +62,7 @@ jobs:
   x86_64-glibc:
     name: x86_64 (glibc)
     if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'x86_64-glibc' || github.event_name != 'workflow_dispatch' }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
@@ -75,8 +75,7 @@ jobs:
           sudo apt-get install -y \
             build-essential \
             cmake \
-            nasm \
-            libnuma-dev
+            nasm
 
       - name: Show build environment
         run: |
@@ -88,8 +87,6 @@ jobs:
           gcc --version | head -1
           echo "=== CMake ==="
           cmake --version | head -1
-          echo "=== NASM ==="
-          nasm --version | head -1
 
       - name: Build x265 multilib
         run: |
@@ -107,10 +104,6 @@ jobs:
           ldd build/8bit/x265
           echo "=== Version ==="
           build/8bit/x265 --version 2>&1 || true
-          echo "=== Static lib ==="
-          file build/8bit/libx265.a
-          echo "=== Features ==="
-          build/8bit/x265 --help 2>&1 | grep -E 'input-depth|bit-depth' || true
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
@@ -128,7 +121,7 @@ jobs:
   x86_64-musl:
     name: x86_64 (fully static)
     if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'x86_64-musl' || github.event_name != 'workflow_dispatch' }}
-    runs-on: ubuntu-20.04
+    runs-on: ubuntu-22.04
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
