@@ -146,7 +146,9 @@ jobs:
             samurai \
             git \
             linux-headers \
-            file
+            file \
+            libstdc++-static \
+            libgcc-static
 
       - name: Checkout source
         uses: actions/checkout@v5
