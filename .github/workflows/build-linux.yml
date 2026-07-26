@@ -2,9 +2,8 @@
 # Build x265 (Patman Mod) — Multi-Arch Linux
 # ====================================================================
 # 构建目标：
-#   x86_64 (glibc)  — Ubuntu 20.04 (glibc 2.31, 兼容性最广)
-#   x86_64 (musl)   — Alpine Linux (全静态链接, 任何 distro 都能用)
-#   AArch64 (glibc) — ARM64 原生构建
+#   x86_64 (glibc)  — Ubuntu 22.04, 静态链接 libstdc++/libgcc
+#   AArch64 (glibc) — ARM64 原生构建, 静态链接 libstdc++/libgcc
 #
 # 产物 (每个 target):
 #   x265         — multilib CLI 二进制 (8+10+12-bit 三合一)
@@ -31,7 +30,6 @@ on:
         options:
           - all
           - x86_64-glibc
-          - x86_64-musl
           - aarch64-glibc
         default: 'all'
 
@@ -113,64 +111,6 @@ jobs:
           if-no-files-found: error
 
   # ==================================================================
-  # x86_64 — fully static (glibc static)
-  # ==================================================================
-  # 使用 Ubuntu g++ + -static 编译全静态二进制。
-  # 不依赖任何动态库, 可在任何 Linux 上直接运行。
-  # ==================================================================
-  x86_64-musl:
-    name: x86_64 (fully static)
-    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'x86_64-musl' || github.event_name != 'workflow_dispatch' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v5
-        with:
-          ref: ${{ github.event.inputs.git_ref || '' }}
-
-      - name: Install dependencies
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y \
-            build-essential \
-            cmake \
-            nasm
-
-      - name: Show build environment
-        run: |
-          echo "=== System ==="
-          uname -a
-          echo "=== Compiler ==="
-          gcc --version | head -1
-
-      - name: Build x265 multilib (fully static)
-        run: |
-          bash "$BUILD_SCRIPT" \
-            --enable-asm ON \
-            --enable-numa OFF \
-            --static-libstdcxx ON \
-            --extra-cmake-args "-DCMAKE_EXE_LINKER_FLAGS=-static" \
-            --jobs "$(nproc)"
-
-      - name: Verify fully static binary
-        run: |
-          echo "=== File type ==="
-          file build/8bit/x265
-          echo "=== Dynamic deps (should say 'not a dynamic executable') ==="
-          ldd build/8bit/x265 2>&1 || echo "(OK — fully static)"
-          echo "=== Version ==="
-          build/8bit/x265 --version 2>&1 || true
-          echo "=== Size ==="
-          ls -lh build/8bit/x265
-
-      - name: Upload artifacts
-        uses: actions/upload-artifact@v5
-        with:
-          name: x265-x86_64-unknown-linux-gnu-static
-          path: build/8bit/x265
-          if-no-files-found: error
-
-  # ==================================================================
   # AArch64 / ARM64 — glibc
   # ==================================================================
   # 使用 GitHub 原生 ARM64 runner。
@@ -238,7 +178,6 @@ jobs:
     name: 📦 Publish Release
     needs:
       - x86_64-glibc
-      - x86_64-musl
       - aarch64-glibc
     if: |
       startsWith(github.ref, 'refs/tags/v') &&
@@ -269,7 +208,6 @@ jobs:
         with:
           files: |
             release/x265-x86_64-unknown-linux-gnu/x265
-            release/x265-x86_64-unknown-linux-gnu-static/x265
             release/x265-aarch64-unknown-linux-gnu/x265
           draft: false
           generate_release_notes: true
@@ -282,7 +220,6 @@ jobs:
     name: 📋 Build Summary
     needs:
       - x86_64-glibc
-      - x86_64-musl
       - aarch64-glibc
     if: always()
     runs-on: ubuntu-22.04
@@ -295,12 +232,7 @@ jobs:
             echo "| Target | Status | Binary |"
             echo "|--------|--------|--------|"
             echo "| x86_64 (glibc) | ${{ needs.x86_64-glibc.result }} | x265-x86_64-unknown-linux-gnu |"
-            echo "| x86_64 (static)| ${{ needs.x86_64-musl.result }} | x265-x86_64-unknown-linux-gnu-static |"
             echo "| AArch64 (glibc)| ${{ needs.aarch64-glibc.result }} | x265-aarch64-unknown-linux-gnu |"
             echo ""
             echo "> 所有二进制均为 multilib (8+10+12-bit 三合一)"
-            echo ""
-            echo "### 如何选择"
-            echo "- **glibc 版本**: 最通用, 依赖系统 glibc ≥ 2.31"
-            echo "- **static 版本**: 全静态链接, 不依赖任何动态库, 任何 Linux 都能直接用"
           } >> "$GITHUB_STEP_SUMMARY"
