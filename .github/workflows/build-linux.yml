@@ -65,7 +65,7 @@ jobs:
     runs-on: ubuntu-20.04
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.git_ref || '' }}
 
@@ -113,7 +113,7 @@ jobs:
           build/8bit/x265 --help 2>&1 | grep -E 'input-depth|bit-depth' || true
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: x265-x86_64-unknown-linux-gnu
           path: build/8bit/x265
@@ -149,7 +149,7 @@ jobs:
             file
 
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.git_ref || '' }}
 
@@ -185,7 +185,7 @@ jobs:
           ls -lh build/8bit/x265
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: x265-x86_64-unknown-linux-musl
           path: build/8bit/x265
@@ -204,7 +204,7 @@ jobs:
     runs-on: ubuntu-24.04-arm
     steps:
       - name: Checkout source
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.git_ref || '' }}
 
@@ -246,7 +246,7 @@ jobs:
           file build/8bit/libx265.a
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v5
         with:
           name: x265-aarch64-unknown-linux-gnu
           path: build/8bit/x265
@@ -269,7 +269,7 @@ jobs:
       contents: write
     steps:
       - name: Download all artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v5
         with:
           path: artifacts
           merge-multiple: false
