@@ -122,57 +122,56 @@ jobs:
   # ==================================================================
   # x86_64 — musl (fully static)
   # ==================================================================
-  # 使用 Alpine Linux (musl libc) 编译全静态二进制。
-  # 不依赖任何动态库, 可在任何 Linux 上直接运行。
+  # 使用 Ubuntu + musl-gcc (musl-tools) 编译全静态二进制。
+  # musl-gcc 默认产生全静态链接的二进制, 不依赖任何动态库。
   # ==================================================================
   x86_64-musl:
     name: x86_64 (musl, fully static)
     if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'x86_64-musl' || github.event_name != 'workflow_dispatch' }}
     runs-on: ubuntu-22.04
-    container:
-      image: alpine:3.20
-      options: --user root
-    defaults:
-      run:
-        shell: sh
     steps:
-      - name: Install system dependencies
-        run: |
-          apk add --no-cache \
-            bash \
-            build-base \
-            cmake \
-            nasm \
-            samurai \
-            git \
-            linux-headers \
-            file \
-            libstdc++-static \
-            libgcc-static
-
       - name: Checkout source
         uses: actions/checkout@v5
         with:
           ref: ${{ github.event.inputs.git_ref || '' }}
 
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            musl-tools \
+            cmake \
+            nasm
+
+      - name: Create musl-g++ wrapper
+        run: |
+          # musl-gcc 是 Ubuntu 上 musl-tools 提供的 GCC 包装器,
+          # 它通过 specs 文件让 gcc 使用 musl libc 并全静态链接。
+          # 这里创建对应的 C++ 包装器:
+          echo '#!/bin/sh' | sudo tee /usr/local/bin/musl-g++
+          echo 'exec g++ -specs /usr/lib/x86_64-linux-musl/musl-gcc.specs -static-libgcc -static-libstdc++ "$@"' | sudo tee -a /usr/local/bin/musl-g++
+          sudo chmod +x /usr/local/bin/musl-g++
+
       - name: Show build environment
         run: |
           echo "=== System ==="
           uname -a
-          echo "=== libc ==="
-          ldd --version 2>&1 || true
-          echo "=== Compiler ==="
-          gcc --version | head -1
+          echo "=== musl-gcc ==="
+          musl-gcc --version 2>&1 | head -1
+          echo "=== musl-g++ ==="
+          musl-g++ --version 2>&1 | head -1
           echo "=== CMake ==="
           cmake --version | head -1
 
-      - name: Build x265 multilib (fully static)
+      - name: Build x265 multilib (fully static via musl-gcc)
+        env:
+          CC: musl-gcc
+          CXX: musl-g++
         run: |
           bash "$BUILD_SCRIPT" \
             --enable-asm ON \
             --enable-numa OFF \
             --static-libstdcxx ON \
-            --extra-cmake-args "-DCMAKE_EXE_LINKER_FLAGS=-static" \
             --jobs "$(nproc)"
 
       - name: Verify fully static binary
