@@ -120,15 +120,15 @@ jobs:
           if-no-files-found: error
 
   # ==================================================================
-  # x86_64 — musl (fully static)
+  # x86_64 — fully static (glibc static)
   # ==================================================================
-  # 使用 Ubuntu + musl-gcc (musl-tools) 编译全静态二进制。
-  # musl-gcc 默认产生全静态链接的二进制, 不依赖任何动态库。
+  # 使用 Ubuntu g++ + -static 编译全静态二进制。
+  # 不依赖任何动态库, 可在任何 Linux 上直接运行。
   # ==================================================================
   x86_64-musl:
-    name: x86_64 (musl, fully static)
+    name: x86_64 (fully static)
     if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'x86_64-musl' || github.event_name != 'workflow_dispatch' }}
-    runs-on: ubuntu-22.04
+    runs-on: ubuntu-20.04
     steps:
       - name: Checkout source
         uses: actions/checkout@v5
@@ -139,34 +139,18 @@ jobs:
         run: |
           sudo apt-get update
           sudo apt-get install -y \
-            musl-tools \
+            build-essential \
             cmake \
             nasm
-
-      - name: Create musl-g++ wrapper
-        run: |
-          # musl-gcc 是 Ubuntu 上 musl-tools 提供的 GCC 包装器,
-          # 它通过 specs 文件让 gcc 使用 musl libc 并全静态链接。
-          # 这里创建对应的 C++ 包装器:
-          echo '#!/bin/sh' | sudo tee /usr/local/bin/musl-g++
-          echo 'exec g++ -specs /usr/lib/x86_64-linux-musl/musl-gcc.specs -static-libgcc -static-libstdc++ "$@"' | sudo tee -a /usr/local/bin/musl-g++
-          sudo chmod +x /usr/local/bin/musl-g++
 
       - name: Show build environment
         run: |
           echo "=== System ==="
           uname -a
-          echo "=== musl-gcc ==="
-          musl-gcc --version 2>&1 | head -1
-          echo "=== musl-g++ ==="
-          musl-g++ --version 2>&1 | head -1
-          echo "=== CMake ==="
-          cmake --version | head -1
+          echo "=== Compiler ==="
+          gcc --version | head -1
 
-      - name: Build x265 multilib (fully static via musl-gcc)
-        env:
-          CC: musl-gcc
-          CXX: musl-g++
+      - name: Build x265 multilib (fully static)
         run: |
           bash "$BUILD_SCRIPT" \
             --enable-asm ON \
@@ -189,7 +173,7 @@ jobs:
       - name: Upload artifacts
         uses: actions/upload-artifact@v5
         with:
-          name: x265-x86_64-unknown-linux-musl
+          name: x265-x86_64-unknown-linux-gnu-static
           path: build/8bit/x265
           if-no-files-found: error
 
@@ -292,7 +276,7 @@ jobs:
         with:
           files: |
             release/x265-x86_64-unknown-linux-gnu/x265
-            release/x265-x86_64-unknown-linux-musl/x265
+            release/x265-x86_64-unknown-linux-gnu-static/x265
             release/x265-aarch64-unknown-linux-gnu/x265
           draft: false
           generate_release_notes: true
@@ -318,12 +302,12 @@ jobs:
             echo "| Target | Status | Binary |"
             echo "|--------|--------|--------|"
             echo "| x86_64 (glibc) | ${{ needs.x86_64-glibc.result }} | x265-x86_64-unknown-linux-gnu |"
-            echo "| x86_64 (musl)  | ${{ needs.x86_64-musl.result }} | x265-x86_64-unknown-linux-musl |"
+            echo "| x86_64 (static)| ${{ needs.x86_64-musl.result }} | x265-x86_64-unknown-linux-gnu-static |"
             echo "| AArch64 (glibc)| ${{ needs.aarch64-glibc.result }} | x265-aarch64-unknown-linux-gnu |"
             echo ""
             echo "> 所有二进制均为 multilib (8+10+12-bit 三合一)"
             echo ""
             echo "### 如何选择"
             echo "- **glibc 版本**: 最通用, 依赖系统 glibc ≥ 2.31"
-            echo "- **musl 版本**: 全静态链接, 不依赖任何动态库, 任何 Linux 都能直接用"
+            echo "- **static 版本**: 全静态链接, 不依赖任何动态库, 任何 Linux 都能直接用"
           } >> "$GITHUB_STEP_SUMMARY"
