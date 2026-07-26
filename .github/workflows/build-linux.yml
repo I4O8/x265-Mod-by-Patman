@@ -5,14 +5,12 @@
 #   x86_64 (glibc)  — Ubuntu 20.04 (glibc 2.31, 兼容性最广)
 #   x86_64 (musl)   — Alpine Linux (全静态链接, 任何 distro 都能用)
 #   AArch64 (glibc) — ARM64 原生构建
-#   ARMv7 / RISC-V  — 交叉编译 (workflow_dispatch 手动触发)
 #
 # 产物 (每个 target):
 #   x265         — multilib CLI 二进制 (8+10+12-bit 三合一)
-#   libx265.a    — 合并后的静态库
 #
 # 触发方式:
-#   1. push tag v*    → 构建所有 target + 创建 GitHub Release
+#   1. push tag v*    → 构建所有 target + 自动发布 Release
 #   2. workflow_dispatch → 手动选择 target 构建 + 上传 artifact
 # ====================================================================
 
@@ -35,7 +33,6 @@ on:
           - x86_64-glibc
           - x86_64-musl
           - aarch64-glibc
-          - experimental
         default: 'all'
 
 concurrency:
@@ -119,9 +116,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: x265-x86_64-unknown-linux-gnu
-          path: |
-            build/8bit/x265
-            build/8bit/libx265.a
+          path: build/8bit/x265
           if-no-files-found: error
 
   # ==================================================================
@@ -192,9 +187,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: x265-x86_64-unknown-linux-musl
-          path: |
-            build/8bit/x265
-            build/8bit/libx265.a
+          path: build/8bit/x265
           if-no-files-found: error
 
   # ==================================================================
@@ -255,113 +248,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: x265-aarch64-unknown-linux-gnu
-          path: |
-            build/8bit/x265
-            build/8bit/libx265.a
+          path: build/8bit/x265
           if-no-files-found: error
 
   # ==================================================================
-  # ARMv7 (experimental) — QEMU + Docker
-  # ==================================================================
-  # 通过 QEMU 模拟 + Docker 容器进行 ARM 32-bit 编译。
-  # 注意: QEMU 模拟编译速度较慢 (预计 ~30-60 分钟)。
-  # ==================================================================
-  armv7-experimental:
-    name: ARMv7 (experimental)
-    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'experimental' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.git_ref || '' }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Build x265 for ARMv7 in Docker
-        run: |
-          docker run --rm \
-            --platform linux/arm/v7 \
-            -v "${{ github.workspace }}:/workspace" \
-            -w /workspace \
-            arm32v7/ubuntu:20.04 \
-            bash -c "
-              apt-get update && apt-get install -y build-essential cmake nasm libnuma-dev &&
-              bash .github/scripts/build-x265.sh \
-                --enable-asm ON \
-                --enable-numa OFF \
-                --static-libstdcxx ON \
-                --jobs \$(nproc)
-            "
-
-      - name: Verify binary
-        run: |
-          echo "=== File type ==="
-          file build/8bit/x265 || echo "Build may have failed — check logs"
-
-      - name: Upload artifacts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: x265-armv7-unknown-linux-gnueabihf
-          path: |
-            build/8bit/x265
-            build/8bit/libx265.a
-          if-no-files-found: ignore
-
-  # ==================================================================
-  # RISC-V 64 (experimental) — QEMU + Docker
-  # ==================================================================
-  riscv64-experimental:
-    name: RISC-V 64 (experimental)
-    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'experimental' }}
-    runs-on: ubuntu-22.04
-    steps:
-      - name: Checkout source
-        uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.inputs.git_ref || '' }}
-
-      - name: Set up QEMU
-        uses: docker/setup-qemu-action@v3
-
-      - name: Build x265 for RISC-V 64 in Docker
-        run: |
-          docker run --rm \
-            --platform linux/riscv64 \
-            -v "${{ github.workspace }}:/workspace" \
-            -w /workspace \
-            riscv64/ubuntu:20.04 \
-            bash -c "
-              apt-get update && apt-get install -y build-essential cmake nasm libnuma-dev &&
-              bash .github/scripts/build-x265.sh \
-                --enable-asm ON \
-                --enable-numa OFF \
-                --static-libstdcxx ON \
-                --jobs \$(nproc)
-            "
-
-      - name: Verify binary
-        run: |
-          echo "=== File type ==="
-          file build/8bit/x265 || echo "Build may have failed — check logs"
-
-      - name: Upload artifacts
-        if: success()
-        uses: actions/upload-artifact@v4
-        with:
-          name: x265-riscv64-unknown-linux-gnu
-          path: |
-            build/8bit/x265
-            build/8bit/libx265.a
-          if-no-files-found: ignore
-
-  # ==================================================================
-  # Release — 将所有 artifacts 打包到 GitHub Release
+  # Release — 自动发布到 GitHub Release
   # ==================================================================
   release:
-    name: 📦 Create Release
+    name: 📦 Publish Release
     needs:
       - x86_64-glibc
       - x86_64-musl
@@ -382,17 +276,11 @@ jobs:
       - name: Prepare release files
         run: |
           mkdir -p release
-
-          # Organize by platform
           for dir in artifacts/*/; do
             platform="$(basename "$dir")"
             mkdir -p "release/$platform"
-            cp -v "$dir"/* "release/$platform/" 2>/dev/null || true
+            cp -v "$dir"/x265 "release/$platform/" 2>/dev/null || true
           done
-
-          # Also flat list for easy access
-          find artifacts/ -type f -exec cp -v {} release/ \;
-
           echo "=== Release files ==="
           find release/ -type f -exec ls -lh {} \;
 
@@ -401,17 +289,14 @@ jobs:
         with:
           files: |
             release/x265-x86_64-unknown-linux-gnu/x265
-            release/x265-x86_64-unknown-linux-gnu/libx265.a
             release/x265-x86_64-unknown-linux-musl/x265
-            release/x265-x86_64-unknown-linux-musl/libx265.a
             release/x265-aarch64-unknown-linux-gnu/x265
-            release/x265-aarch64-unknown-linux-gnu/libx265.a
-          draft: true
+          draft: false
           generate_release_notes: true
           fail_on_unmatched_files: false
 
   # ==================================================================
-  # Summary — 在所有构建完成后输出汇总
+  # Summary
   # ==================================================================
   summary:
     name: 📋 Build Summary
