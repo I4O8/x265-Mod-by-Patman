@@ -1,0 +1,441 @@
+# ====================================================================
+# Build x265 (Patman Mod) — Multi-Arch Linux
+# ====================================================================
+# 构建目标：
+#   x86_64 (glibc)  — Ubuntu 20.04 (glibc 2.31, 兼容性最广)
+#   x86_64 (musl)   — Alpine Linux (全静态链接, 任何 distro 都能用)
+#   AArch64 (glibc) — ARM64 原生构建
+#   ARMv7 / RISC-V  — 交叉编译 (workflow_dispatch 手动触发)
+#
+# 产物 (每个 target):
+#   x265         — multilib CLI 二进制 (8+10+12-bit 三合一)
+#   libx265.a    — 合并后的静态库
+#
+# 触发方式:
+#   1. push tag v*    → 构建所有 target + 创建 GitHub Release
+#   2. workflow_dispatch → 手动选择 target 构建 + 上传 artifact
+# ====================================================================
+
+name: 🏗️ Build x265 for Linux
+
+on:
+  push:
+    tags: [ 'v*' ]
+  workflow_dispatch:
+    inputs:
+      git_ref:
+        description: 'Git ref to build (branch/tag)'
+        default: 'master'
+        required: false
+      targets:
+        description: 'Targets to build'
+        type: choice
+        options:
+          - all
+          - x86_64-glibc
+          - x86_64-musl
+          - aarch64-glibc
+          - experimental
+        default: 'all'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  BUILD_SCRIPT: .github/scripts/build-x265.sh
+
+# ====================================================================
+# 默认 checkout 参数
+# ====================================================================
+# 注意: 这个 workflow 假设它运行在 Patman86/x265-Mod-by-Patman
+# 的仓库或 fork 中。如果是从你自己的 fork 运行，无需修改。
+# 如果要直接引用 Patman 的原仓库，取消下面 CHECKOUT_REPO 的注释。
+# ====================================================================
+# env:
+#   CHECKOUT_REPO: Patman86/x265-Mod-by-Patman
+
+jobs:
+  # ==================================================================
+  # x86_64 — glibc
+  # ==================================================================
+  # 使用 Ubuntu 20.04 (glibc 2.31), 兼容绝大多数现代 Linux 发行版。
+  # 静态链接 libstdc++/libgcc, 减少对宿主 GCC 版本的依赖。
+  # ==================================================================
+  x86_64-glibc:
+    name: x86_64 (glibc)
+    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'x86_64-glibc' || github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-20.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git_ref || '' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            nasm \
+            libnuma-dev
+
+      - name: Show build environment
+        run: |
+          echo "=== System ==="
+          uname -a
+          echo "=== glibc ==="
+          ldd --version 2>&1 | head -1
+          echo "=== Compiler ==="
+          gcc --version | head -1
+          echo "=== CMake ==="
+          cmake --version | head -1
+          echo "=== NASM ==="
+          nasm --version | head -1
+
+      - name: Build x265 multilib
+        run: |
+          bash "$BUILD_SCRIPT" \
+            --enable-asm ON \
+            --static-libstdcxx ON \
+            --enable-numa OFF \
+            --jobs "$(nproc)"
+
+      - name: Verify binary
+        run: |
+          echo "=== File type ==="
+          file build/8bit/x265
+          echo "=== Dynamic deps ==="
+          ldd build/8bit/x265
+          echo "=== Version ==="
+          build/8bit/x265 --version 2>&1 || true
+          echo "=== Static lib ==="
+          file build/8bit/libx265.a
+          echo "=== Features ==="
+          build/8bit/x265 --help 2>&1 | grep -E 'input-depth|bit-depth' || true
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: x265-x86_64-unknown-linux-gnu
+          path: |
+            build/8bit/x265
+            build/8bit/libx265.a
+          if-no-files-found: error
+
+  # ==================================================================
+  # x86_64 — musl (fully static)
+  # ==================================================================
+  # 使用 Alpine Linux (musl libc) 编译全静态二进制。
+  # 不依赖任何动态库, 可在任何 Linux 上直接运行。
+  # ==================================================================
+  x86_64-musl:
+    name: x86_64 (musl, fully static)
+    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'x86_64-musl' || github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-22.04
+    container:
+      image: alpine:3.20
+      options: --user root
+    defaults:
+      run:
+        shell: /bin/sh
+    steps:
+      - name: Install system dependencies
+        run: |
+          apk add --no-cache \
+            build-base \
+            cmake \
+            nasm \
+            samurai \
+            git \
+            linux-headers \
+            file
+
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git_ref || '' }}
+
+      - name: Show build environment
+        run: |
+          echo "=== System ==="
+          uname -a
+          echo "=== libc ==="
+          ldd --version 2>&1 || true
+          echo "=== Compiler ==="
+          gcc --version | head -1
+          echo "=== CMake ==="
+          cmake --version | head -1
+
+      - name: Build x265 multilib (fully static)
+        run: |
+          sh "$BUILD_SCRIPT" \
+            --enable-asm ON \
+            --enable-numa OFF \
+            --static-libstdcxx ON \
+            --extra-cmake-args "-DCMAKE_EXE_LINKER_FLAGS=-static" \
+            --jobs "$(nproc)"
+
+      - name: Verify fully static binary
+        run: |
+          echo "=== File type ==="
+          file build/8bit/x265
+          echo "=== Dynamic deps (should say 'not a dynamic executable') ==="
+          ldd build/8bit/x265 2>&1 || echo "(OK — fully static)"
+          echo "=== Version ==="
+          build/8bit/x265 --version 2>&1 || true
+          echo "=== Size ==="
+          ls -lh build/8bit/x265
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: x265-x86_64-unknown-linux-musl
+          path: |
+            build/8bit/x265
+            build/8bit/libx265.a
+          if-no-files-found: error
+
+  # ==================================================================
+  # AArch64 / ARM64 — glibc
+  # ==================================================================
+  # 使用 GitHub 原生 ARM64 runner。
+  # 如果 ubuntu-24.04-arm 在你的环境中不可用, 参考下方注释的
+  # QEMU+Docker 备选方案。
+  # ==================================================================
+  aarch64-glibc:
+    name: AArch64 (glibc)
+    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'aarch64-glibc' || github.event_name != 'workflow_dispatch' }}
+    runs-on: ubuntu-24.04-arm
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git_ref || '' }}
+
+      - name: Install dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            build-essential \
+            cmake \
+            nasm \
+            libnuma-dev
+
+      - name: Show build environment
+        run: |
+          echo "=== System ==="
+          uname -a
+          echo "=== glibc ==="
+          ldd --version 2>&1 | head -1
+          echo "=== Compiler ==="
+          gcc --version | head -1
+
+      - name: Build x265 multilib
+        run: |
+          bash "$BUILD_SCRIPT" \
+            --enable-asm ON \
+            --static-libstdcxx ON \
+            --enable-numa OFF \
+            --jobs "$(nproc)"
+
+      - name: Verify binary
+        run: |
+          echo "=== File type ==="
+          file build/8bit/x265
+          echo "=== Dynamic deps ==="
+          ldd build/8bit/x265
+          echo "=== Version ==="
+          build/8bit/x265 --version 2>&1 || true
+          echo "=== Static lib ==="
+          file build/8bit/libx265.a
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: x265-aarch64-unknown-linux-gnu
+          path: |
+            build/8bit/x265
+            build/8bit/libx265.a
+          if-no-files-found: error
+
+  # ==================================================================
+  # ARMv7 (experimental) — QEMU + Docker
+  # ==================================================================
+  # 通过 QEMU 模拟 + Docker 容器进行 ARM 32-bit 编译。
+  # 注意: QEMU 模拟编译速度较慢 (预计 ~30-60 分钟)。
+  # ==================================================================
+  armv7-experimental:
+    name: ARMv7 (experimental)
+    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'experimental' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git_ref || '' }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build x265 for ARMv7 in Docker
+        run: |
+          docker run --rm \
+            --platform linux/arm/v7 \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            arm32v7/ubuntu:20.04 \
+            bash -c "
+              apt-get update && apt-get install -y build-essential cmake nasm libnuma-dev &&
+              bash .github/scripts/build-x265.sh \
+                --enable-asm ON \
+                --enable-numa OFF \
+                --static-libstdcxx ON \
+                --jobs \$(nproc)
+            "
+
+      - name: Verify binary
+        run: |
+          echo "=== File type ==="
+          file build/8bit/x265 || echo "Build may have failed — check logs"
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x265-armv7-unknown-linux-gnueabihf
+          path: |
+            build/8bit/x265
+            build/8bit/libx265.a
+          if-no-files-found: ignore
+
+  # ==================================================================
+  # RISC-V 64 (experimental) — QEMU + Docker
+  # ==================================================================
+  riscv64-experimental:
+    name: RISC-V 64 (experimental)
+    if: ${{ github.event.inputs.targets == 'all' || github.event.inputs.targets == 'experimental' }}
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.git_ref || '' }}
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Build x265 for RISC-V 64 in Docker
+        run: |
+          docker run --rm \
+            --platform linux/riscv64 \
+            -v "${{ github.workspace }}:/workspace" \
+            -w /workspace \
+            riscv64/ubuntu:20.04 \
+            bash -c "
+              apt-get update && apt-get install -y build-essential cmake nasm libnuma-dev &&
+              bash .github/scripts/build-x265.sh \
+                --enable-asm ON \
+                --enable-numa OFF \
+                --static-libstdcxx ON \
+                --jobs \$(nproc)
+            "
+
+      - name: Verify binary
+        run: |
+          echo "=== File type ==="
+          file build/8bit/x265 || echo "Build may have failed — check logs"
+
+      - name: Upload artifacts
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: x265-riscv64-unknown-linux-gnu
+          path: |
+            build/8bit/x265
+            build/8bit/libx265.a
+          if-no-files-found: ignore
+
+  # ==================================================================
+  # Release — 将所有 artifacts 打包到 GitHub Release
+  # ==================================================================
+  release:
+    name: 📦 Create Release
+    needs:
+      - x86_64-glibc
+      - x86_64-musl
+      - aarch64-glibc
+    if: |
+      startsWith(github.ref, 'refs/tags/v') &&
+      github.event_name != 'workflow_dispatch'
+    runs-on: ubuntu-22.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: false
+
+      - name: Prepare release files
+        run: |
+          mkdir -p release
+
+          # Organize by platform
+          for dir in artifacts/*/; do
+            platform="$(basename "$dir")"
+            mkdir -p "release/$platform"
+            cp -v "$dir"/* "release/$platform/" 2>/dev/null || true
+          done
+
+          # Also flat list for easy access
+          find artifacts/ -type f -exec cp -v {} release/ \;
+
+          echo "=== Release files ==="
+          find release/ -type f -exec ls -lh {} \;
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            release/x265-x86_64-unknown-linux-gnu/x265
+            release/x265-x86_64-unknown-linux-gnu/libx265.a
+            release/x265-x86_64-unknown-linux-musl/x265
+            release/x265-x86_64-unknown-linux-musl/libx265.a
+            release/x265-aarch64-unknown-linux-gnu/x265
+            release/x265-aarch64-unknown-linux-gnu/libx265.a
+          draft: true
+          generate_release_notes: true
+          fail_on_unmatched_files: false
+
+  # ==================================================================
+  # Summary — 在所有构建完成后输出汇总
+  # ==================================================================
+  summary:
+    name: 📋 Build Summary
+    needs:
+      - x86_64-glibc
+      - x86_64-musl
+      - aarch64-glibc
+    if: always()
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Generate summary
+        run: |
+          {
+            echo "## 🏗️ x265 Build Summary"
+            echo ""
+            echo "| Target | Status | Binary |"
+            echo "|--------|--------|--------|"
+            echo "| x86_64 (glibc) | ${{ needs.x86_64-glibc.result }} | x265-x86_64-unknown-linux-gnu |"
+            echo "| x86_64 (musl)  | ${{ needs.x86_64-musl.result }} | x265-x86_64-unknown-linux-musl |"
+            echo "| AArch64 (glibc)| ${{ needs.aarch64-glibc.result }} | x265-aarch64-unknown-linux-gnu |"
+            echo ""
+            echo "> 所有二进制均为 multilib (8+10+12-bit 三合一)"
+            echo ""
+            echo "### 如何选择"
+            echo "- **glibc 版本**: 最通用, 依赖系统 glibc ≥ 2.31"
+            echo "- **musl 版本**: 全静态链接, 不依赖任何动态库, 任何 Linux 都能直接用"
+          } >> "$GITHUB_STEP_SUMMARY"
