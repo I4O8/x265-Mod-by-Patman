@@ -198,21 +198,19 @@ jobs:
           name: x265-aarch64-unknown-linux-gnu
           path: release/aarch64
 
-      - name: Verify release files
+      - name: Rename for release
         run: |
-          echo "=== Release files ==="
-          find release/ -type f -exec ls -lh {} \;
-          echo "=== x86_64 ==="
-          file release/x86_64/x265
-          echo "=== AArch64 ==="
-          file release/aarch64/x265
+          mv release/x86_64/x265 release/x265-x86_64
+          mv release/aarch64/x265 release/x265-aarch64
+          rm -rf release/x86_64 release/aarch64
+          ls -lh release/
 
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
-            release/x86_64/x265
-            release/aarch64/x265
+            release/x265-x86_64
+            release/x265-aarch64
           draft: false
           generate_release_notes: true
           fail_on_unmatched_files: false
