@@ -64,8 +64,8 @@ while [[ $# -gt 0 ]]; do
         --build-dir)     BUILD_DIR="$2"; shift 2 ;;
         --prefix)        PREFIX_DIR="$2"; shift 2 ;;
         --jobs)          JOBS="$2"; shift 2 ;;
-        --enable-shared) ENABLE_SHARED="ON"; shift ;;
-        --enable-numa)   ENABLE_NUMA="ON"; shift ;;
+        --enable-shared) ENABLE_SHARED="$2"; shift 2 ;;
+        --enable-numa)   ENABLE_NUMA="$2"; shift 2 ;;
         --enable-asm)    ENABLE_ASM="$2"; shift 2 ;;
         --extra-cmake-args) EXTRA_CMAKE_ARGS="$2"; shift 2 ;;
         --cross-prefix)   CROSS_PREFIX="$2"; shift 2 ;;
