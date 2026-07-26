@@ -134,11 +134,12 @@ jobs:
       options: --user root
     defaults:
       run:
-        shell: /bin/sh
+        shell: sh
     steps:
       - name: Install system dependencies
         run: |
           apk add --no-cache \
+            bash \
             build-base \
             cmake \
             nasm \
@@ -165,7 +166,7 @@ jobs:
 
       - name: Build x265 multilib (fully static)
         run: |
-          sh "$BUILD_SCRIPT" \
+          bash "$BUILD_SCRIPT" \
             --enable-asm ON \
             --enable-numa OFF \
             --static-libstdcxx ON \
